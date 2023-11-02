@@ -22,6 +22,8 @@ import (
 	"github.com/akiyosi/qt/widgets"
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/neovim/go-client/nvim"
+
+	"github.com/go-text/typesetting/fontscan"
 )
 
 var editor *Editor
@@ -110,12 +112,15 @@ type Editor struct {
 	colors                 *ColorPalette
 	notify                 chan *Notify
 	fontCh                 chan []*Font
+	loadSysFontCh          chan error
 	cbChan                 chan *string
 	chUiPrepared           chan bool
 	geometryUpdateTimer    *time.Timer
 	sysTray                *widgets.QSystemTrayIcon
 	side                   *WorkspaceSide
 	savedGeometry          *core.QByteArray
+	fontmap                *fontscan.FontMap
+	logger                 *GonvimLogger
 	prefixToMapMetaKey     string
 	macAppArg              string
 	configDir              string
@@ -222,6 +227,13 @@ func InitEditor(options Options, args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.ctx = ctx
 
+	// load System Fonts
+	e.loadSysFontCh = make(chan error, 2)
+	go func() {
+		e.fontmap = fontscan.NewFontMap(e.logger)
+		e.loadSysFontCh <- e.fontmap.UseSystemFonts("")
+	}()
+
 	var err error
 	// detect home dir
 	e.homeDir, err = homedir.Dir()
@@ -233,6 +245,7 @@ func InitEditor(options Options, args []string) {
 	// load config
 	e.configDir, e.config = newConfig(e.homeDir, e.opts.NoConfig)
 	e.putLog("Detecting the goneovim configuration directory:", e.configDir)
+
 	e.overwriteConfigByCLIOption()
 
 	// get parent process id
@@ -256,7 +269,12 @@ func InitEditor(options Options, args []string) {
 
 	// e.setAppDirPath(home)
 
-	e.fontCh = make(chan []*Font, 100)
+	loadSysFontErr := <-e.loadSysFontCh
+	if loadSysFontErr != nil {
+		panic(loadSysFontErr)
+	}
+
+	e.fontCh = make(chan []*Font, 2)
 	go func() {
 		e.fontCh <- parseFont(
 			e.config.Editor.FontFamily,
@@ -351,16 +369,16 @@ func (e *Editor) exitEditor(cancel context.CancelFunc) {
 	os.Exit(ret)
 }
 
-func (e *Editor) putLog(v ...interface{}) {
-	if e.opts.Debug == "" {
-		return
-	}
-
-	log.Println(
-		fmt.Sprintf("%07.3f", float64(time.Now().UnixNano()/1000-e.startuptime)/1000),
-		strings.TrimRight(strings.TrimLeft(fmt.Sprintf("%v", v), "["), "]"),
-	)
-}
+// func (e *Editor) putLog(v ...interface{}) {
+// 	if e.opts.Debug == "" {
+// 		return
+// 	}
+//
+// 	log.Println(
+// 		fmt.Sprintf("%07.3f", float64(time.Now().UnixNano()/1000-e.startuptime)/1000),
+// 		strings.TrimRight(strings.TrimLeft(fmt.Sprintf("%v", v), "["), "]"),
+// 	)
+// }
 
 func (e *Editor) bindResizeEvent() {
 	e.window.ConnectResizeEvent(func(event *gui.QResizeEvent) {
@@ -500,6 +518,23 @@ func (e *Editor) newSplitter() {
 	e.splitter = splitter
 }
 
+// func (e *Editor) setDebuglog() (file *os.File) {
+// 	if e.opts.Debug == "" {
+// 		return nil
+// 	}
+//
+// 	file, err := os.OpenFile(e.opts.Debug, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+// 	if err != nil {
+// 		fmt.Println(err)
+//
+// 		os.Exit(1)
+// 	}
+// 	log.SetOutput(file)
+// 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+//
+// 	return
+// }
+
 func (e *Editor) setDebuglog() (file *os.File) {
 	if e.opts.Debug == "" {
 		return nil
@@ -508,13 +543,28 @@ func (e *Editor) setDebuglog() (file *os.File) {
 	file, err := os.OpenFile(e.opts.Debug, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		fmt.Println(err)
-
 		os.Exit(1)
 	}
+
 	log.SetOutput(file)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
+	e.logger = &GonvimLogger{
+		logger: log.New(file, "", log.LstdFlags|log.Lmicroseconds),
+	}
+
 	return
+}
+
+func (e *Editor) putLog(v ...interface{}) {
+	if e.opts.Debug == "" {
+		return
+	}
+
+	e.logger.Println(
+		fmt.Sprintf("%07.3f", float64(time.Now().UnixNano()/1000-e.startuptime)/1000),
+		strings.TrimRight(strings.TrimLeft(fmt.Sprintf("%v", v), "["), "]"),
+	)
 }
 
 func (e *Editor) initWorkspaces(ctx context.Context, signal *neovimSignal, redrawUpdates chan [][]interface{}, guiUpdates chan []interface{}, nvimCh chan *nvim.Nvim, uiRemoteAttachedCh chan bool, isSetWindowState bool) {
