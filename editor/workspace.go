@@ -219,7 +219,7 @@ func (ws *Workspace) initUI() {
 	editor.putLog("assembled workspace UI components")
 }
 
-func (ws *Workspace) initFont() {
+func (ws *Workspace) initWsFont() {
 	ws.screen.font = editor.font
 	ws.screen.fallbackfonts = editor.fallbackfonts
 	ws.font = ws.screen.font
@@ -792,9 +792,6 @@ func (ws *Workspace) updateSize() (windowWidth, windowHeight, cols, rows int) {
 	screenWidth := width - scrollbarWidth - minimapWidth
 	screenHeight := height - tablineHeight
 
-	if ws.screen.font == nil {
-		fmt.Println("nil!")
-	}
 	rw := screenWidth - int(math.Ceil(float64(int(float64(screenWidth)/ws.screen.font.cellwidth))*ws.screen.font.cellwidth))
 	rh := screenHeight % ws.screen.font.lineHeight
 	screenWidth -= rw
@@ -1944,7 +1941,8 @@ func (ws *Workspace) parseAndApplyFont(str string, font *(*Font), fonts *([]*Fon
 		if i == 0 {
 			var ff *Font
 			if *font == nil {
-				ff = initFontNew(
+				ff = initFont(
+					false,
 					fontFamily,
 					fontHeight,
 					fontWeight,
@@ -1957,7 +1955,8 @@ func (ws *Workspace) parseAndApplyFont(str string, font *(*Font), fonts *([]*Fon
 					continue
 				}
 
-				ff = initFontNew(
+				ff = initFont(
+					false,
 					fontFamily,
 					fontHeight,
 					fontWeight,
@@ -1974,7 +1973,8 @@ func (ws *Workspace) parseAndApplyFont(str string, font *(*Font), fonts *([]*Fon
 			}
 
 		} else {
-			ff := initFontNew(
+			ff := initFont(
+				false,
 				fontFamily,
 				fontHeight,
 				fontWeight,
